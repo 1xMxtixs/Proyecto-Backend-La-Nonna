@@ -1,92 +1,68 @@
 # logistics/router.py
+
 from fastapi import APIRouter, HTTPException, status, Depends
-from typing import List, Dict, Any
-from .schemas import (
-    PedidoParaPicking, ConfirmacionPicking, 
-    PickingItem, DocumentoImpresion, ItemConfirmado
-)
-from checkout.schemas import Orden 
+from datetime import datetime
+from typing import List, Dict
+from .schemas import PedidoParaPicking, ConfirmacionPicking, PickingItem, DocumentoImpresion
+from checkout.schemas import Orden, OrdenOut
 from auth.schemas import User
 from auth.router import get_current_user
-import datetime
 
-router = APIRouter(
-    prefix="/api/logistica",
-    tags=["5. Logística y Despacho"]
-)
+router = APIRouter(prefix="/api/logistica", tags=["5. Logística y Despacho"])
 
-# === Endpoints para PICKING ===
-
-@router.get("/pedidos-en-preparacion", response_model=List[PedidoParaPicking])
-async def obtener_pedidos_en_preparacion(
-    usuario: User = Depends(get_current_user)
-):
+# === 1. VISTA BODEGA: Pedidos Nuevos (Pagados) ===
+@router.get("/pedidos-picking", response_model=List[PedidoParaPicking])
+async def obtener_pedidos_picking(usuario: User = Depends(get_current_user)):
+    ordenes = await Orden.find(
+        {"estado": {"$in": ["Pagado", "En Preparación"]}}
+    ).sort(+Orden.fecha).to_list()
     
-    ordenes_pendientes = await Orden.find(
-        Orden.estado == "Pagado"
-    ).to_list()
-    
-    pedidos_para_picking = []
-    for orden in ordenes_pendientes:
-        items_picking = []
-        for item_carrito in orden.items:
-            items_picking.append(
-                PickingItem(
-                    sku=item_carrito.variante_sku,
-                    nombreProducto=item_carrito.nombreProducto,
-                    ubicacion="Pasillo A-1 (Simulado)",
-                    cantidadPedida=item_carrito.cantidad
-                )
-            )
-        
-        pedidos_para_picking.append(
-            PedidoParaPicking(
-                id=str(orden.id), 
-                numeroOrden=orden.numeroOrden,
-                fecha=orden.fecha,
-                items=items_picking
-            )
-        )
-        
-    return pedidos_para_picking
+    resultado = []
+    for orden in ordenes:
+        items_picking = [
+            PickingItem(
+                sku=getattr(i, 'producto_id', 'GEN'), 
+                nombreProducto=i.nombre, 
+                ubicacion="Pasillo A", 
+                cantidadPedida=i.cantidad
+            ) for i in orden.items
+        ]
+        resultado.append(PedidoParaPicking(
+            id=str(orden.id), 
+            numeroOrden=orden.numeroOrden, 
+            fecha=orden.fecha, 
+            items=items_picking
+        ))
+    return resultado
 
-@router.post("/picking/confirmar", response_model=Dict[str, str])
-async def confirmar_cantidades_picking(
-    confirmacion: ConfirmacionPicking,
-    usuario: User = Depends(get_current_user)
-):
-    orden = await Orden.get(confirmacion.pedidoId)
+# === 2. VISTA DESPACHO: Pedidos Listos para Salir ===
+@router.get("/pedidos-despacho", response_model=List[OrdenOut])
+async def obtener_pedidos_despacho(usuario: User = Depends(get_current_user)):
+    ordenes = await Orden.find(
+        {"estado": {"$in": ["Listo para Despacho", "En Ruta"]}}
+    ).sort(+Orden.fecha).to_list()
+    return ordenes
+
+# === 3. CAMBIO DE ESTADO GENÉRICO ===
+@router.put("/pedidos/{orden_id}/estado")
+async def cambiar_estado_orden(orden_id: str, nuevo_estado: str, usuario: User = Depends(get_current_user)):
+    orden = await Orden.get(orden_id)
     if not orden:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Pedido no encontrado")
-        
-    if orden.estado != "Pagado":
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "El pedido no está en estado 'Pagado'")
-
-    es_parcial = False
-    for item_confirmado in confirmacion.itemsConfirmados:
-        for item_original in orden.items:
-            if item_original.variante_sku == item_confirmado.sku:
-                if item_original.cantidad > item_confirmado.cantidadEncontrada:
-                    es_parcial = True
-                    break
-        if es_parcial:
-            break
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Orden no encontrada")
     
-    if es_parcial:
-        nuevo_estado = "Listo para despacho (Parcial)"
-        print(f"Pedido {orden.numeroOrden} preparado con FALTANTES. Notificando a admin.")
-        mensaje = f"Pedido {orden.numeroOrden} preparado con FALTANTES. Notificado al administrador."
-    else:
-        nuevo_estado = "Listo para despacho"
-        print(f"Pedido {orden.numeroOrden} preparado completo.")
-        mensaje = f"Pedido {orden.numeroOrden} listo para despacho."
-    
-    await orden.update({"$set": {"estado": nuevo_estado}})
+    orden.estado = nuevo_estado
+    await orden.save()
+    return {"mensaje": f"Estado actualizado a {nuevo_estado}"}
 
-    return {
-        "mensaje": mensaje,
-        "nuevo_estado": nuevo_estado
-    }
+# === 4. CONFIRMACIÓN DE PICKING (Bodega -> Despacho) ===
+@router.post("/picking/confirmar")
+async def confirmar_picking(confirmacion: ConfirmacionPicking, usuario: User = Depends(get_current_user)):
+    orden = await Orden.get(confirmacion.pedidoId)
+    if not orden: raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Orden no encontrada")
+    
+    orden.estado = "Listo para Despacho"
+    await orden.save()
+    return {"mensaje": "Picking finalizado. Orden lista para despacho."}
 
 @router.get("/picking/{pedido_id}/imprimir-hoja", response_model=DocumentoImpresion) 
 async def imprimir_hoja_picking(
@@ -95,14 +71,35 @@ async def imprimir_hoja_picking(
 ):
     orden = await Orden.get(pedido_id)
     if not orden:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Pedido no encontrado"
-        )
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Pedido no encontrado")
     
     url_pdf = f"/static/picking/hoja_{orden.numeroOrden}.pdf"
-    print(f"Generando hoja de picking {url_pdf}")
     return DocumentoImpresion(
         url_pdf=url_pdf,
-        mensaje="Hoja de picking generada correctamente."
+        mensaje="Hoja generada"
     )
+
+# === Endpoint para KPIs del Dashboard ===
+@router.get("/dashboard-kpis")
+async def obtener_kpis_logistica(
+    usuario: User = Depends(get_current_user)
+):
+    hoy_inicio = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    en_ruta = await Orden.find(Orden.estado == "Enviado").count()
+    
+    entregados_hoy = await Orden.find(
+        Orden.estado == "Entregado",
+        Orden.fecha >= hoy_inicio
+    ).count()
+    
+    alertas = await Orden.find(Orden.estado == "Fallido").count()
+    
+    pendientes = await Orden.find(Orden.estado == "Pagado").count()
+
+    return {
+        "en_ruta": en_ruta,
+        "entregados_hoy": entregados_hoy,
+        "alertas": alertas,
+        "pendientes": pendientes
+    }

@@ -1,10 +1,10 @@
 # admin/schemas.py
 from pydantic import BaseModel, Field
 from typing import List, Optional
-from datetime import date
+from datetime import date, datetime
 from beanie import Document, BeanieObjectId
 
-# --- Modelo para Reglas del carrito (B-35) ---
+# --- Modelo para Reglas del carrito ---
 class ReglasCarrito(Document):
     cantidadMinimaGlobal: int = Field(default=1, gt=0)
     cantidadMaximaPorSKU: int = Field(default=10, gt=0) 
@@ -14,7 +14,7 @@ class ReglasCarrito(Document):
     class Settings:
         name = "reglas_carrito"
 
-# --- Modelo para Cupones (B-36) ---
+# --- Modelo para Cupones ---
 class CuponBase(BaseModel):
     codigo: str = Field(..., description="El código que el cliente ingresará")
     tipo: str = Field("Porcentaje", description="Tipo de cupón: Porcentaje o Monto fijo")
@@ -33,8 +33,33 @@ class Cupon(Document, CuponBase):
         name = "cupones"
 
 class CuponOut(CuponBase):
-    id: BeanieObjectId = Field(..., alias="_id")
+    id: BeanieObjectId
 
     class Config:
         from_attributes = True
         arbitrary_types_allowed = True
+
+# --- Modelo para Configuración de Seguridad ---
+class SecuritySettings(Document):
+    requerirMinimoCaracteres: bool = True
+    expiracionPassword: bool = False
+    requerir2FA: bool = False
+    
+    class Settings:
+        name = "security_settings"
+
+# --- Modelo para Historial de Auditoría ---
+class AuditLog(Document):
+    usuario: str 
+    accion: str  
+    ip: str
+    fecha: datetime = Field(default_factory=datetime.now)
+    estado: str 
+    
+    class Settings:
+        name = "audit_logs"
+
+# --- Schema para Editar Usuario (Admin) ---
+class UserUpdateAdmin(BaseModel):
+    nombre: Optional[str] = None
+    rol: Optional[str] = None      

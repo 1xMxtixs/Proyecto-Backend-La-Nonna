@@ -1,9 +1,11 @@
 # main.py
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+import os
 from contextlib import asynccontextmanager
 from db import init_db
-
 from auth.router import router as auth_router
 from catalog.router import router as catalog_router
 from cart.router import router as cart_router
@@ -25,9 +27,24 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+origins = [
+    "http://localhost:4321",
+    "http://127.0.0.1:4321",
+]
+
+os.makedirs("uploads", exist_ok=True)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,       
+    allow_credentials=True,
+    allow_methods=["*"],         
+    allow_headers=["*"],
+)
     
 
-
+app.mount("/static", StaticFiles(directory="uploads"), name="static")
 app.include_router(auth_router)
 app.include_router(catalog_router)
 app.include_router(cart_router)

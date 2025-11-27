@@ -7,14 +7,14 @@ from typing import List, Optional
 import shutil
 import os
 
-# --- 1. Importaciones de Beanie y Schemas ---
 from beanie import BeanieObjectId, Link
 from beanie.operators import In
 from .schemas import (
     Categoria, Etiqueta, Producto,
     CategoriaCreate, CategoriaOut, 
     ProductoCreate, ProductoOut,
-    VarianteProducto, ImagenProducto
+    VarianteProducto, ImagenProducto,
+    Vitrina, VitrinaCreate, VitrinaOut
 )
 
 router = APIRouter(
@@ -59,9 +59,21 @@ async def crear_categoria(categoria_data: CategoriaCreate):
 
 @router.get("/categorias", response_model=List[CategoriaOut])
 async def obtener_categorias():
-
-    categorias = await Categoria.find_all().project(CategoriaOut).to_list()
+    categorias = await Categoria.find_all().to_list()
     return categorias
+
+@router.delete("/categorias/{categoria_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def eliminar_categoria(categoria_id: BeanieObjectId):
+    categoria = await Categoria.get(categoria_id)
+    
+    if not categoria:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Categoría no encontrada"
+        )
+    
+    await categoria.delete()
+    return
 
 
 # === Endpoints para ETIQUETAS  ===
@@ -119,15 +131,23 @@ async def crear_producto(producto_data: ProductoCreate):
     return ProductoOut.model_validate(nuevo_producto)
 
 @router.get("/productos", response_model=List[ProductoOut])
-async def obtener_productos():
-    productos = await Producto.find_all().project(ProductoOut).to_list()
+async def obtener_productos(solo_activos: bool = False):
+    if solo_activos:
+        productos = await Producto.find(
+            Producto.estado == "Activo", 
+            fetch_links=True
+        ).to_list()
+    else:
+        productos = await Producto.find_all(fetch_links=True).to_list()
+        
     return productos
 
 @router.get("/productos/{producto_id}", response_model=ProductoOut)
 async def obtener_producto(producto_id: BeanieObjectId):
     producto = await Producto.find_one(
-        Producto.id == producto_id
-    ).project(ProductoOut)
+        Producto.id == producto_id,
+        fetch_links=True
+    )
     
     if not producto:
         raise HTTPException(
@@ -162,8 +182,20 @@ async def actualizar_producto(producto_id: BeanieObjectId, producto_data: Produc
     
     await producto.update({"$set": update_data})
     
-    await producto.reload() 
-    return ProductoOut.model_validate(producto)
+    producto_actualizado = await Producto.get(producto_id, fetch_links=True)
+    return ProductoOut.model_validate(producto_actualizado)
+
+@router.delete("/productos/{producto_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def eliminar_producto(producto_id: BeanieObjectId):
+    producto = await Producto.get(producto_id)
+    if not producto:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Producto no encontrado"
+        )
+    
+    await producto.delete()
+    return
 
 # === Endpoints para VARIANTES  ===
 
@@ -179,8 +211,9 @@ async def crear_variante_para_producto(
     await producto.update({"$push": {"variantes": variante_data.model_dump()}})
     
     producto_actualizado = await Producto.find_one(
-        Producto.id == producto_id
-    ).project(ProductoOut)
+        Producto.id == producto_id,
+        fetch_links=True 
+    )
     
     return producto_actualizado
 
@@ -243,3 +276,49 @@ async def eliminar_imagen_de_producto(
     await producto.update({"$pull": {"imagenes": {"url": url_imagen}}})
     
     return
+
+# === ENDPOINTS VITRINAS ===
+
+@router.post("/vitrinas", response_model=VitrinaOut)
+async def crear_vitrina(data: VitrinaCreate):
+    if await Vitrina.find_one(Vitrina.slug == data.slug):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "El slug ya existe")
+        
+    productos = await Producto.find(In(Producto.id, data.productoIds), fetch_links=True).to_list()
+    
+    nueva_vitrina = Vitrina(
+        nombre=data.nombre,
+        slug=data.slug,
+        activa=data.activa,
+        productos=productos 
+    )
+    await nueva_vitrina.insert()
+    
+    return VitrinaOut.model_validate(nueva_vitrina)
+
+@router.get("/vitrinas", response_model=List[VitrinaOut])
+async def obtener_vitrinas():
+    return await Vitrina.find_all(fetch_links=True).to_list()
+
+@router.put("/vitrinas/{id}", response_model=VitrinaOut)
+async def actualizar_vitrina(id: BeanieObjectId, data: VitrinaCreate):
+    vitrina = await Vitrina.get(id)
+    if not vitrina:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Vitrina no encontrada")
+    
+    productos = await Producto.find(In(Producto.id, data.productoIds), fetch_links=True).to_list()
+    
+    vitrina.nombre = data.nombre
+    vitrina.activa = data.activa
+    vitrina.productos = productos
+    
+    await vitrina.save()
+    return VitrinaOut.model_validate(vitrina)
+
+@router.delete("/vitrinas/{id}")
+async def eliminar_vitrina(id: BeanieObjectId):
+    vitrina = await Vitrina.get(id)
+    if not vitrina:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Vitrina no encontrada")
+    await vitrina.delete()
+    return {"mensaje": "Vitrina eliminada"}

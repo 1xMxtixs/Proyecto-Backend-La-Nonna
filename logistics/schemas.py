@@ -35,5 +35,8 @@ class ConfirmacionPicking(BaseModel):
 class DocumentoImpresion(BaseModel):
     url_pdf: str
     mensaje: str
+
+
+    
     
             

@@ -4,7 +4,7 @@ from typing import Optional, List, Any
 from beanie import Document, Link, BeanieObjectId
 from auth.schemas import User 
 
-# --- Modelo Embebido (dentro de Carrito) ---
+# --- Modelo Embebido  ---
 class CartItem(BaseModel):
     producto_id: BeanieObjectId
     variante_sku: str
@@ -13,7 +13,7 @@ class CartItem(BaseModel):
     cantidad: int
     subtotal: float
 
-# --- Modelo de Documento (Base de Datos) ---
+# --- Modelo de Documento  ---
 class Carrito(Document):
     propietario: Link[User]
     items: List[CartItem] = []
@@ -25,7 +25,7 @@ class Carrito(Document):
             [("propietario", 1)], 
         ]
 
-# --- Schemas para la API (BaseModel) ---
+# --- Schemas para la API  ---
 
 class CartItemAdd(BaseModel):
     producto_id: BeanieObjectId

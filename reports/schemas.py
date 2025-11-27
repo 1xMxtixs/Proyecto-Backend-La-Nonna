@@ -17,9 +17,10 @@ class TopProducto(BaseModel):
 
 class AdminKPIResponse(BaseModel):
     ventasTotales: float
+    ingresosDelivery: float
     numeroPedidos: int
     ticketPromedio: float
-    TopProductos: List[TopProducto]    
+    topProductos: List[TopProducto]    
 
 class TopProductoMargen(BaseModel):
     nombre: str

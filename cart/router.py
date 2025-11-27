@@ -16,7 +16,7 @@ router = APIRouter(
     tags=["3. Carrito y Checkout"]
 )
 
-# --- Funciones de Ayuda (Helpers) ---
+# --- Funciones de Ayuda ---
 
 async def recalcular_totales(carrito: Carrito) -> CartOut:
     subtotal_general = 0

@@ -1,42 +1,52 @@
 # checkout/schemas.py
+
 from pydantic import BaseModel, Field
 from typing import Optional, List, Any, Dict
 from datetime import datetime
 from beanie import Document, Link, BeanieObjectId
 from auth.schemas import User
-from cart.schemas import CartItem 
 
-# --- Modelo para Método de Entrega ---
-
-class MetodoEntregaDetalles(BaseModel):
-    direccion: Optional[str] = None
-    zona: Optional[str] = None
-    sucursalId: Optional[str] = None
-
-class MetodoEntrega(BaseModel):
+# --- 1. Modelo para Datos de Entrega ---
+class DatosEntrega(BaseModel):
+    nombre: str
+    email: str
+    telefono: str
     metodo: str 
-    detalles: MetodoEntregaDetalles
+    direccion: Optional[str] = None 
 
-# --- Modelos para Iniciar Pago  ---
-class IniciarPagoResponse(BaseModel):
-    url_pago: str 
-    id_transaccion: str 
+# --- 2. Inputs desde el Frontend ---
+class ItemOrdenInput(BaseModel):
+    nombre: str
+    precio: float
+    cantidad: int
+    img: Optional[str] = None
 
-# --- Modelos para Confirmar Pago  ---
-class ConfirmarPagoRequest(BaseModel):
-    datosGateway: Dict[str, Any]
+class IniciarPagoRequest(BaseModel):
+    items: List[ItemOrdenInput]
+    total: float
+    datos_entrega: Optional[DatosEntrega] = None
 
-# --- Modelos de Documento ---
 
+# --- 3. Respuesta hacia el Frontend ---
+class WebpayInitResponse(BaseModel):
+    url: str
+    token: str
+    orden_id: str
+
+# --- 4. Request para confirmar  ---
+class WebpayCommitRequest(BaseModel):
+    token_ws: str
+
+# --- 5. Modelos de Base de Datos ---
 class Orden(Document):
     propietario: Link[User]
     numeroOrden: str = Field(..., unique=True)
     fecha: datetime = Field(default_factory=datetime.now)
     estado: str 
-    items: List[CartItem] 
-    costoEnvio: float = 0.0
-    descuento: float = 0.0
+    items: List[ItemOrdenInput]
     total: float
+    token_ws: Optional[str] = None 
+    datos_entrega: Optional[DatosEntrega] = None
     
     class Settings:
         name = "ordenes"
@@ -51,16 +61,16 @@ class Boleta(Document):
     class Settings:
         name = "boletas"
 
-# --- Schemas para la API ---
-
 class OrdenOut(BaseModel):
-    id: BeanieObjectId = Field(..., alias="_id")
+    id: BeanieObjectId 
     numeroOrden: str
-    fecha: datetime
     estado: str
     total: float
-    items: List[CartItem]
-    
+    items: List[ItemOrdenInput] = []
+    datos_entrega: Optional[DatosEntrega] = None
+
     class Config:
         from_attributes = True
         arbitrary_types_allowed = True
+
+       
