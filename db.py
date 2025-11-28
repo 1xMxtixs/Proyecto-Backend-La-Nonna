@@ -27,7 +27,7 @@ db_settings = Settings()
 
 # --- Lista de Modelos ---
 DOCUMENT_MODELS: List[Type] = [
-    User,
+    User, 
     Categoria,
     Etiqueta,
     Producto,
